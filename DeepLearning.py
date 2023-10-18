@@ -7,6 +7,7 @@ import pandas as pd
 from keras.layers import LSTM, Dense
 from keras.models import Sequential
 from keras.models import load_model
+from keras.metrics import mean_absolute_percentage_error
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import MinMaxScaler
 
@@ -16,15 +17,16 @@ import tradeHelper as th
 
 SymbolName = "EURUSD_i"
 timeframe = 'm1'
-FetchDaysOfSymbol = 45
-TrainingNumber: int = 35000
-NumberOfFuturesData = 300
+FetchDaysOfSymbol = 25
+TrainingNumber: int = 20000
+NumberOfFuturesData = 30
 ModelSizeForFutures = 10000
-ModelSize = 100
+ModelSize = 500
 ModelUnits = 50
-ModelEpochs = 3
-ModelBatchSize = 2
-ModelVerbs = 3
+ModelEpochs = 2
+ModelBatchSize = 1
+ModelVerbs = 2
+DenseUnit = 25
 IsTrainTestData = True
 
 # endregion
@@ -38,15 +40,17 @@ st = today + timedelta(days=-FetchDaysOfSymbol)
 c = th.GetCandels(t[0].name, st, today, timeframe)
 th.shotdown()
 df = pd.DataFrame(c)  # تمام داده ها گرفته شده
+df = df.rename(columns={'close': 'Close'})
+
 df["Date"] = pd.to_datetime(df.time, unit='s')
 df.index = df['Date']
-df = df.rename(columns={'close': 'Close'})
 Mytest = df[-NumberOfFuturesData:]
 df = df[:-NumberOfFuturesData]
 
 # endregion
 
 # region cleaning Data
+
 
 data = df.sort_index(ascending=True, axis=0)
 new_dataset = pd.DataFrame(index=range(0, len(df)), columns=['Date', 'Close'])
@@ -58,7 +62,7 @@ for i in range(0, len(data)):
 new_dataset.index = new_dataset.Date
 new_dataset.drop("Date", axis=1, inplace=True)
 
-final_dataset = new_dataset.values  # در اینجا داده های نهایی ذخیره شده
+final_dataset = new_dataset.values
 
 # endregion
 
@@ -83,14 +87,20 @@ x_train_data = np.reshape(x_train_data, (x_train_data.shape[0], x_train_data.sha
 # region train model
 
 lstm_model = Sequential()
-# lstm_model.add(LSTM(units=ModelUnits, return_sequences=True, input_shape=(x_train_data.shape[1], 1)))
-# lstm_model.add(LSTM(units=ModelUnits))
-# lstm_model.add(Dense(1))
-lstm_model.add(LSTM(50,return_sequences=True,input_shape=(x_train_data.shape[1],1)))
-# lstm_model.add(LSTM(50,return_sequences=True))
-lstm_model.add(LSTM(50,return_sequences=False))
-lstm_model.add(Dense(25))
+lstm_model.add(LSTM(units=ModelUnits, return_sequences=True, input_shape=(x_train_data.shape[1], 1)))
+lstm_model.add(LSTM(units=ModelUnits, return_sequences=True))
+lstm_model.add(LSTM(units=ModelUnits, return_sequences=True))
+lstm_model.add(LSTM(units=ModelUnits, return_sequences=True))
+lstm_model.add(LSTM(units=ModelUnits, return_sequences=True))
+lstm_model.add(LSTM(units=ModelUnits, return_sequences=True))
+lstm_model.add(LSTM(units=ModelUnits))
 lstm_model.add(Dense(1))
+# lstm_model.add(LSTM(ModelUnits, return_sequences=True, input_shape=(x_train_data.shape[1], 1)))
+# lstm_model.add(LSTM(ModelUnits, return_sequences=True))
+# # lstm_model.add(LSTM(ModelUnits, return_sequences=True))
+# lstm_model.add(LSTM(ModelUnits, return_sequences=False))
+# lstm_model.add(Dense(DenseUnit))
+# lstm_model.add(Dense(1))
 
 path = 'saved_lstm_model.h5'
 if os.path.isfile(path):
@@ -104,8 +114,8 @@ else:
 
 # region train test data
 
-if IsTrainTestData :
-    inputs_data = new_dataset[len(new_dataset) - len(valid_data) - ModelSize:].values
+if IsTrainTestData:
+    inputs_data = final_dataset[len(final_dataset) - len(valid_data) - ModelSize:]
     inputs_data = inputs_data.reshape(-1, 1)
     inputs_data = scaler.transform(inputs_data)
 
@@ -124,9 +134,13 @@ if IsTrainTestData :
 
 # region check model
 # محاسبه معیارهای ارزیابی (در اینجا میانگین مربعات خطا)
-if IsTrainTestData :
-    mse = mean_squared_error(new_dataset[TrainingNumber:]['Close'].values, closing_price)
-    print(f'Mean Squared Error: {mse}')
+if IsTrainTestData:
+    mse = 0
+    try:
+        mse = mean_squared_error(new_dataset[TrainingNumber:]['Close'], closing_price)
+        print(f'Mean Squared Error: {mse}')
+    finally:
+        mse = 0
 
 
 # endregion
@@ -156,20 +170,25 @@ def predict_future(model, data, n_steps, future_steps):
 
 
 future_predictions = predict_future(lstm_model, new_dataset, ModelSizeForFutures, NumberOfFuturesData)
+mse2 = mean_squared_error(new_dataset[-NumberOfFuturesData:]['Close'], future_predictions)
+print(f'Mean Squared Error 2 : {mse2}')
+
 
 # endregion
 
 # region   plot
 train_data = new_dataset[:TrainingNumber]
 valid_data = new_dataset[TrainingNumber:]
-if IsTrainTestData :
+if IsTrainTestData:
     valid_data['Predictions'] = closing_price
+    valid_data['Predictions'] =  valid_data['Predictions'].shift(-1)
 Mytest['Predictions'] = future_predictions
+# Mytest['Predictions'] = Mytest['Predictions'].shift(1)
 
 # plt.figure(figsize=(8, 4))
-if IsTrainTestData :
-    plt.plot(valid_data[["Predictions"]], c='r', label='predict')
 plt.plot(valid_data[['Close']], c='g', label='train')
+if IsTrainTestData:
+    plt.plot(valid_data[["Predictions"]], c='r', label='predict')
 plt.plot(Mytest[['Close']], c='b', label='real')
 plt.plot(Mytest[['Predictions']], c='c', label='future')
 # rcParams['figure.figsize'] = 20, 10
